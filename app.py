@@ -2,6 +2,7 @@ from pathlib import Path
 import ctypes
 import ipaddress
 import os
+import re
 import sys
 import uuid
 import xml.etree.ElementTree as ET
@@ -14,11 +15,17 @@ PROFILES={'quick':['-sT','--top-ports','100'],'lan-discovery':['-sn'],
 
 def command(profile,target,authorized=False):
     if profile not in PROFILES:raise ValueError('Nieznany profil.')
-    network=ipaddress.ip_network(target,strict=False)
+    if target.lower()=='localhost':target='127.0.0.1'
+    try:network=ipaddress.ip_network(target,strict=False)
+    except ValueError:
+        hostname=target.encode('idna').decode('ascii')
+        if len(hostname)>253 or not all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',label) for label in hostname.rstrip('.').split('.')):raise ValueError('Nieprawidłowy adres lub nazwa hosta.')
+        if not authorized or profile=='localhost-audit':raise ValueError('Nazwa hosta wymaga --authorized i profilu innego niż localhost-audit.')
+        return ['nmap',*PROFILES[profile],'-T3','--max-retries','1','--host-timeout','60s',hostname]
     if network.num_addresses>256:raise ValueError('Maksymalnie 256 adresów na uruchomienie.')
     if not network.is_loopback and not authorized:raise ValueError('Wymagane --authorized dla własnego lub uzgodnionego celu.')
     if profile=='localhost-audit' and not network.is_loopback:raise ValueError('Ten profil jest tylko dla localhost.')
-    return ['nmap',*PROFILES[profile],'-T3','--max-retries','1','--host-timeout','60s',str(network) if '/' in target else str(network.network_address)]
+    return ['nmap',*(['-6'] if network.version==6 else []),*PROFILES[profile],'-T3','--max-retries','1','--host-timeout','60s',str(network) if '/' in target else str(network.network_address)]
 
 def parse_xml(path):
     path=Path(path)
